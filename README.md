@@ -2,7 +2,7 @@
 
 A pluggable, real-time chat micro-service you can mount behind **any** front-end
 (web, mobile, desktop).  
-Runs on bare Node 20 LTS, MongoDB, Redis and Socket.IO – *no Docker required*.
+Runs on bare Node 20 LTS, MongoDB, Redis and Socket.IO
 
 [![CI](https://github.com/your-org/chat-api/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/chat-api/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
