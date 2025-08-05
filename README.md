@@ -1,240 +1,138 @@
-# 💬 Chat-API
+# 💬 Chat-API (Node 20 + Mongo 6 + Redis 7)
 
-Modern, self-hosted chat micro-service – bring your own front-end and plug in real-time messaging with file-sharing, MongoDB persistence, Redis queues, and socket.io.
+A pluggable, real-time chat micro-service you can mount behind **any** front-end
+(web, mobile, desktop).  
+Runs on bare Node 20 LTS, MongoDB, Redis and Socket.IO – *no Docker required*.
+
+[![CI](https://github.com/your-org/chat-api/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/chat-api/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
 ## Features
 
-| Capability                              | Details                                                                      |
-|-----------------------------------------|------------------------------------------------------------------------------|
-| **1-to-1 & group conversations**        | any size (variable limit = 333 members)                                           |
-| **Message types**                       | text · image(s) · video · GIF sticker · link preview (URL field)             |
-| **Media pipeline**                      | multipart `/media` upload → sharp / ffmpeg conversion → WebP / MP4            |
-| **Inline reactions**                    | unlimited emoji per message                                                  |
-| **Mentions**                            | `@username` detection with push or socket notification                       |
-| **Rate-limit**                          | configurable per-route *express-rate-limit*                                  |
-| **Sockets**                             | socket.io v4 for live chat / typing / reactions                              |
-| **Push abstraction**                    | example Web-Push code stub (add FCM/APNs later)                              |
-| **MongoDB schemata included**           | Conversation · Member · ChatMessage · User · Notification · Read marker      |
-| **Redis**                               | BullMQ for image/video jobs + in-memory presence list                        |
-| **Node 20+**                            | ESM + top-level `await`, no transpiler                                       |
-
-> – run directly on bare Node 20+.  
-> You need **MongoDB >= 5** and **Redis >= 6** reachable via network.
+| Core | Details |
+| --- | --- |
+| **Conversations** | group / DM, admin & member roles, hashing to avoid duplicates |
+| **Messages** | text • image(s) • GIF stickers (GIPHY) • links |
+| **Reactions** | any unicode emoji, toggle to remove |
+| **Moderation** | delete own message, leave chat |
+| **Search** | within a chat or all chats |
+| **Notifications** | Socket.IO push to online members, offline batching ready |
+| **Storage** | MongoDB collections, R2-compatible object storage helpers |
+| **No Docker** | plain `node`, `npm`, `mongod`, `redis-server` |
 
 ---
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/<your-org>/chat-api.git
+# 1 · clone
+git clone https://github.com/your-org/chat-api.git
 cd chat-api
-cp .env.sample .env                 # edit Mongo / Redis URIs & JWT secret
-npm ci
-npm run dev                          # nodemon (--watch src)
+
+# 2 · install dependencies
+npm ci      # uses the lock-file shipped with the repo
+
+# 3 · configure
+cp .env.sample .env    # fill in Mongo/Redis URLs & a JWT secret
+
+# 4 · start Mongo & Redis (examples)
+
+## Linux (system packages)
+sudo service mongod start
+redis-server --daemonize yes
+
+## Windows (Chocolatey)
+choco install mongodb redis-64
+net start MongoDB
+redis-server --service-start
+
+## macOS (Homebrew – *optional*)
+brew services start mongodb-community@6.0
+brew services start redis
+
+# 5 · run dev server
+npm run dev            # nodemon + ES-modules
+# -> API   : http://localhost:4000
+# -> Socket: ws://localhost:4000
 ```
 
-| Service          | Default URL                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| REST API         | [http://localhost:5000/api/v1](http://localhost:5000/api/v1) |
-| Socket namespace | `/chat` (connect to same origin)                             |
---------------------------------------
+## REST API
 
-| Verb     | Endpoint                   | Body / params                              | Description                          |
-| -------- | -------------------------- | ------------------------------------------ | ------------------------------------ |
-| `POST`   | `/auth/login`              | `{ username, password }`                   | JWT login (demo only)                |
-| `POST`   | `/chat/start`              | `{ members[], name?, description? }`       | Create group or DM                   |
-| `GET`    | `/chat/:id`                | —                                          | Get single conversation (metadata)   |
-| `GET`    | `/chat?user=:username`     | `page,limit` query                         | Paginated list for a user            |
-| `PATCH`  | `/chat/:id`                | multipart (cover/background) + JSON        | Edit name / desc / media             |
-| `DELETE` | `/chat/:id`                | —                                          | Leave ⟶ auto-delete if last member   |
-| `POST`   | `/chat/:id/message`        | `{ type, content?, url?, tags[] }` + media | Send message                         |
-| `GET`    | `/chat/:id/message`        | `page,limit` query                         | Fetch messages (newest→oldest)       |
-| `DELETE` | `/chat/:id/message/:msgId` | —                                          | Delete own message                   |
-| `POST`   | `/chat/:id/react`          | `{ messageId, emoji }`                     | Toggle reaction                      |
-| `PATCH`  | `/chat/:id/read/:msgId`    | —                                          | Mark up-to msgId as read             |
-| `GET`    | `/search`                  | `q, conversationId?`                       | Full-text search in one / all convos |
+| Verb       | Endpoint                                                  | Body / Params                                                      | Description                           |
+| ---------- | --------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------- |
+| **POST**   | `/api/v1/chat/start/:username`                            | `{ name?, description?, members[], collaborators?[] }`             | Create conversation (DM if 2 members) |
+| **PATCH**  | `/api/v1/chat/:username/:conversationId`                  | `multipart/form-data` (`data` JSON + optional `media[] / cover[]`) | Edit name / desc / theme / cover / bg |
+| **DELETE** | `/api/v1/chat/:username/:conversationId`                  | —                                                                  | Leave (or delete if last member)      |
+| **GET**    | `/api/v1/chat/:conversationId`                            | —                                                                  | Conversation by id                    |
+| **GET**    | `/api/v1/chats/:username?limit=&page=`                    | —                                                                  | Paginated list for user               |
+| **POST**   | `/api/v1/chat/messages/:username`                         | `{ conversationId, content, type, attachment?, mentions?[] }`      | Send text / sticker / link            |
+| **DELETE** | `/api/v1/chat/messages/:username/:messageId`              | —                                                                  | Delete own message                    |
+| **PATCH**  | `/api/v1/chat/react/:username`                            | `{ messageId, emoji }`                                             | Toggle reaction                       |
+| **GET**    | `/api/v1/chat/messages/:conversationId?page=&limit=`      | —                                                                  | Paginated message history             |
+| **GET**    | `/api/v1/chat/search/:username/:conversationId?keywords=` | —                                                                  | Search inside one chat                |
+| **GET**    | `/api/v1/chat/search/:username?keywords=`                 | —                                                                  | Search across all user chats          |
 
-### All endpoints require Authorization: Bearer <JWT> except /auth/*.
+All endpoints require a session middleware that sets req.user
+({ id, username }) – adapt to JWT / session store of your choice.
 
-## Socket.io Events (/chat namespace)
+| Direction           | Event               | Payload                                      |
+| ------------------- | ------------------- | -------------------------------------------- |
+| **Client → Server** | `authenticate`      | `{ token }` (set in `socket.handshake.auth`) |
+| **Server → Client** | `shareChatMessage`  | full message object                          |
+| ↳                   | `shareChatReaction` | `{ message_id, reaction, user, removed }`    |
+| ↳                   | `chatEdit`          | `{ status, message }` (success / error)      |
+| ↳                   | `notification`      | { custom payloads – DM request, etc. }       |
 
-| Client → Server | Payload                        | Server → all in room | Payload                  |
-| --------------- | ------------------------------ | -------------------- | ------------------------ |
-| `chat:typing`   | `{ convId, typing: true }`     | `chat:typing`        | same                     |
-| `chat:message`  | same as REST `/message` body   | `chat:message`       | full saved message       |
-| `chat:reaction` | `{ convId, messageId, emoji }` | `chat:reaction`      | same + `removed` flag    |
-| ―               | —                              | `chat:member:update` | joined/left/admin change |
+Sockets are mapped in Redis (chat:sockets:<username>) so you can scale to
+multiple Node processes with a Socket.IO Redis adapter.
 
-### Handshake must include JWT query param: ?token=<JWT>.
-
-
-## MongoDB Schemas (Mongoose)
-User
-``` js
-{
-  id: String,           // nanoid 10
-  username: String,
-  passwordHash: String, // bcrypt
-  profile: {
-    avatarURL: { '360p': String, '180p': String }
-  },
-  mentions: { type: String, enum: ['everyone','approval','nobody'], default:'everyone' },
-  blocked: [String]     // array of user ids
-}
+## Project Structure
 ```
-Conversation 
-``` js
-{
-  id: String,                    // nanoid 12
-  name: String,
-  description: String,
-  creator: String,               // user id
-  collaborators: [String],       // admin ids
-  members_hash: String,          // SHA-256 sorted member ids
-  members_count: Number,
-  dm: Boolean,
-  cover: Map,                    // { '720p': url, ... }
-  background: Map,               // same
-  last_message: String,
-  last_message_user: String,
-  last_message_id: String,
-  last_message_update: Date,
-  time_created: Date,
-  last_time_modified: Date
-}
-```
-
-ConversationMember
-``` js
-{
-  conversation_id: String,
-  member: String,        // user id
-  inviter: String,
-  queue: Boolean,        // true = pending approval
-  invited_on: Date,
-  joined_on: Date
-}
-```
-ChatMessage
-
-``` js
-{
-  id: String,                   // nanoid 14
-  conversation_id: String,
-  user: String,                 // user id or 'system'
-  type: { type:String, enum:['text','media','sticker','link'] },
-  content: String,              // text
-  attachment: {
-    type: String,               // image | video | gif | link
-    url: Map,                   // { '360p': string | string[] }
-    sensitivity: { type:String, enum:['neutral','sensitive','unsafe'] }
-  },
-  mentions: [String],           // usernames
-  reply_to: { messageId:String, username:String, snippet:String },
-  reactions: [
-    { reaction:String, users:[String] }
-  ],
-  last_reaction_time: Date,
-  time_posted: Date,
-  time_modified: Date
-}
-```
-
-ChatView (read markers)
-``` js
-{
-  user: String,                 // user id
-  conversation_id: String,
-  last_message_read: String,    // msg id
-  last_time_read: Date,
-  read: Boolean
-}
-```
-
-Notification (sample)
-
-``` js
-{
-  id: String,
-  user: String,
-  type: { type:String, enum:['messageMention','messageApproval','reaction'] },
-  conversation_id: String,
-  asset_id: String,        // message id
-  notifier: String,
-  notifier_avatar: String,
-  message: String,
-  preview: String,
-  read: Boolean,
-  time_posted: Date
-}
-```
-## Redis Usage
-| Key / Channel          | Purpose                      |
-| ---------------------- | ---------------------------- |
-| `bull:*`               | BullMQ job queue for media   |
-| `presence:<username>`  | set of active socket IDs     |
-| `chat:typing:<convId>` | pub/sub for typing indicator |
-
-
-### Project Structure
-
-```
-chat-api/
+ChatAPI/
 ├─ src/
-│  ├─ config/
-│  │   ├─ env.js           # loads .env, exports config
-│  │   └─ rateLimit.js
-│  ├─ models/              # mongoose schemas above
+│  ├─ server.js              # Express + Socket bootstrap
+│  ├─ socket.js              # Socket.IO init & helpers
 │  ├─ routes/
-│  │   ├─ authRoutes.js
 │  │   └─ chatRoutes.js
-│  ├─ controllers/         # chatController.js, authController.js
-│  ├─ middleware/
-│  │   ├─ authenticate.js  # JWT verify
-│  │   ├─ multerMedia.js   # image/video parser (sharp/ffmpeg helpers)
-│  │   └─ socketUtils.js   # connectedUsers map helpers
-│  ├─ jobs/                # BullMQ processors (imageWorker.js)
-│  ├─ sockets/             # socket.io event handlers
-│  └─ server.js            # express app & http / socket server
+│  ├─ controllers/
+│  │   └─ chatController.js  # (full logic, ~950 LOC)
+│  ├─ models/                # Mongoose schemas
+│  ├─ services/
+│  │   └─ r2.js              # tiny “upload/delete” wrapper
+│  ├─ utils/                 # hash, emoji, clamp, etc.
+│  └─ config/
+│      ├─ env.js             # loads .env
+│      └─ redis.js
 ├─ .env.sample
-└─ package.json
+├─ package.json
+└─ README.md  ← you are here
 ```
 
-## Environment Variables
-| Variable       | Example                       | Description                    |
-| -------------- | ----------------------------- | ------------------------------ |
-| `PORT`         | `5000`                        | HTTP listen port               |
-| `MONGO_URI`    | `mongodb://localhost/chatapi` | MongoDB connection string      |
-| `REDIS_URL`    | `redis://127.0.0.1:6379/0`    | Redis connection               |
-| `JWT_SECRET`   | `superSecret123`              | HS256 signing key              |
-| `MEDIA_TEMP`   | `/tmp/chat-api`               | temp folder for uploads        |
-| `CDN_BASE_URL` | `https://cdn.example.com`     | public bucket/prefix for media |
-| `MAX_FILE_MB`  | `250`                         | per-file upload limit          |
+## Environment Variables (.env)
+
+| Key           | Required | Default                   | Notes                                    |
+| ------------- | -------- | ------------------------- | ---------------------------------------- |
+| `PORT`        | no       | `4000`                    | HTTP & WS listen port                    |
+| `MONGODB_URI` | **yes**  | —                         | e.g. `mongodb://localhost:27017/chatapi` |
+| `REDIS_URI`   | **yes**  | —                         | `redis://127.0.0.1:6379`                 |
+| `JWT_SECRET`  | **yes**  | —                         | if you use JWT auth                      |
+| `CDN`         | no       | `https://cdn.example.com` | base URL for R2 / S3 files               |
 
 (Add any cloud-storage credentials you need for uploadLocalFolderToR2 or swap to S3 helpers.)
-## Local Development (no Docker)
 
-### 1 · Start MongoDB & Redis
+#### Push / Notifications stub
 
-| OS / method               | Command(s)                                                                    |
-|---------------------------|-------------------------------------------------------------------------------|
-| **Docker (any OS)**       | `docker run -d --name mongo -p 27017:27017 mongo:6`<br>`docker run -d --name redis -p 6379:6379 redis:7` |
-| **Ubuntu / Debian**       | `sudo apt update && sudo apt install -y mongodb-org redis-server`<br>`sudo systemctl enable --now mongod redis-server` |
-| **macOS (Homebrew)**      | `brew services start mongodb-community`<br>`brew services start redis` |
-| **Windows (Chocolatey)**  | `choco install mongodb redis-64`<br>then start the “MongoDB” and “Redis” services from *Services.msc* |
+The repo ships with simple Web-Push (VAPID) utilities in src/push/.
+Replace or extend with FCM/APNs as needed – just implement sendPush(userId, payload) promise and wire into controller hooks (notifyMention, notifyReactionBatch).
 
-All commands expose Mongo on **`mongodb://localhost:27017`** and Redis on **`redis://localhost:6379`**.
+## Rate Limits
 
-### 2 · Install dependencies
+| Route group          | Window (s) | Max calls | Uses               |
+| -------------------- | ---------- | --------- | ------------------ |
+| POST `/chat/message` | 3          | 6         | fast typing bursts |
+| POST `/chat/start`   | 10         | 3         | prevent spam       |
+| PATCH `/chat/:id`    | 30         | 5         | edits / media      |
 
-```bash
-git clone https://github.com/<your-org>/chat-api.git
-cd chat-api
-cp .env.sample .env     # update MONGO_URI and REDIS_URL if you changed ports
-npm ci
-
-npm run dev             # nodemon watches src/
-```
-Open the REST playground at http://localhost:5000/api-docs.
+You can expand or limit these as you see fit or add more limits to the other endpoints.
