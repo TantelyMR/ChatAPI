@@ -1,4 +1,4 @@
-# 💬 Chat-API (Node 20 + Mongo 6 + Redis 7)
+# 💬 Chat-API
 
 A pluggable, real-time chat micro-service you can mount behind **any** front-end
 (web, mobile, desktop).  
